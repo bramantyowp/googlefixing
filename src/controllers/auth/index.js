@@ -123,66 +123,56 @@ class AuthController extends BaseController {
   }
 
   googleSignIn = async (req, res, next) => {
-    const id_token = req.body.idToken;  // Mendapatkan ID token dari request body
-    const credential = GoogleAuthProvider.credential(id_token);  // Membuat kredensial Google menggunakan ID token
-  
-    const auth = getAuth();
-    try {
-      // Melakukan sign-in menggunakan kredensial Google
-      const signIn = await signInWithCredential(auth, credential);
-  
-      // Cek apakah pengguna sudah ada di database dengan email yang sama
-      let user = await this.model.getOne({ where: { email: signIn.user.email } });
-  
-      if (user) {
-        // Kasus 1: Pengguna sudah terdaftar dengan akun lokal (provider 'local')
-        if (user.provider === 'local') {
-          // Update data pengguna agar terhubung dengan Google
-          user = await this.model.update(user.id, {
-            provider: 'google',        // Ubah provider menjadi 'google'
-            googleId: signIn.user.uid, // Simpan UID Google pengguna
-          });
-        }
-        // Kasus 2: Pengguna sudah terdaftar dengan akun Google (tidak perlu perubahan apa pun)
-        // Di sini, kita hanya mengembalikan token dan data pengguna tanpa perubahan data.
-      } else {
-        // Kasus 3: Pengguna baru, buat akun baru
-        user = await this.model.set({
-          email: signIn.user.email,
-          password: null,              // Password tidak diperlukan karena login dengan Google
-          fullname: signIn.user.displayName, // Nama lengkap dari akun Google
-          provider: 'google',          // Tandai pengguna menggunakan provider Google
-          googleId: signIn.user.uid,   // Simpan UID Google untuk identifikasi
-          avatar: signIn.user.photoURL, // Avatar pengguna dari Google (opsional)
-          roleId: 3                    // Atur role pengguna (misal '3' untuk pengguna umum)
-        });
-      }
-  
-      // Buat token JWT untuk pengguna yang baru atau yang sudah ada
-      const token = createToken({
-        id: user.id,  // Gunakan ID pengguna untuk membuat token
+  const id_token = req.body.idToken;
+  const credential = GoogleAuthProvider.credential(id_token);
+
+  const auth = getAuth();
+  try {
+    const signIn = await signInWithCredential(auth, credential);
+    
+    // Debug log
+    console.log('Google Sign-In Response:', signIn);
+    
+    let user = await this.model.getOne({ where: { email: signIn.user.email } });
+    if (user?.provider === 'local') {
+      user = await this.model.update(user.id, {
+        provider: signIn.providerId,
+        googleId: signIn.user.uid,
       });
-  
-      // Kirimkan respons dengan data pengguna dan token
-      return res.status(200).json(
-        this.apiSend({
-          code: 200,
-          status: "success",
-          message: "Sign in with Google successfully",
-          data: {
-            user: {
-              ...user,
-              password: undefined,  // Jangan kirimkan password pengguna dalam response
-            },
-            token,  // Token JWT untuk autentikasi
-          },
-        })
-      );
-    } catch (e) {
-      // Tangani error jika terjadi masalah saat proses sign-in
-      next(new ServerError(e));
     }
+
+    if (!user) {
+      user = await this.model.set({
+        email: signIn.user.email,
+        password: null,
+        fullname: signIn.user.displayName,
+        provider: signIn.providerId,
+        googleId: signIn.user.uid,
+        avatar: signIn.user.photoURL,
+        roleId: 3,
+      });
+    }
+
+    const token = createToken({
+      id: user.id,
+    });
+
+    // Send response
+    return res.status(200).json({
+      code: 200,
+      status: 'success',
+      message: 'Sign in with google successfully',
+      data: {
+        user: { ...user, password: undefined },
+        token,
+      },
+    });
+  } catch (e) {
+    console.log('Error during Google sign-in:', e);  // Debug log
+    next(new ServerError(e));
   }
+}
+
 }  
 
 new AuthController(user);
