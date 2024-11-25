@@ -122,58 +122,65 @@ class AuthController extends BaseController {
     );
   }
 
-  googleSignIn = async (req, res, next) => {
-  const id_token = req.body.idToken;
-  const credential = GoogleAuthProvider.credential(id_token);
+  googleSignIn = async(req, res, next) =>{
+    const id_token = req.body.idToken;
+    const credential = GoogleAuthProvider.credential(id_token);
 
-  const auth = getAuth();
-  try {
-    const signIn = await signInWithCredential(auth, credential);
-    
-    // Debug log
-    console.log('Google Sign-In Response:', signIn);
-    
-    let user = await this.model.getOne({ where: { email: signIn.user.email } });
-    if (user?.provider === 'local') {
-      user = await this.model.update(user.id, {
-        provider: signIn.providerId,
-        googleId: signIn.user.uid,
+    // Sign in with credential from the Google user.
+    const auth = getAuth();
+    try{
+      const signIn = await signInWithCredential(auth, credential)
+      // Handle Errors here.
+
+      let user = await this.model.getOne({ where: { email: signIn.user.email } });
+      if(user?.provider === 'local'){
+        user = await this.model.update(user.id, {
+          provider: signIn.providerId,
+          googleId: signIn.user.uid,
+        })
+      }
+
+      if (!user) {
+        user = await this.model.set({
+          email: signIn.user.email,
+          password: null,
+          fullname: signIn.user.displayName,
+          provider: signIn.providerId,
+          googleId: signIn.user.uid,
+          avatar: signIn.user.photoURL,
+          roleId: 3
+        });
+      }
+      
+      const token = createToken({
+        id: user.id,
       });
+
+      return res.status(200).json(
+        this.apiSend({
+          code: 200,
+          status: "success",
+          message: "Sign in with google succesfully",
+          data: {
+            user: {
+              ...user,
+              password: undefined,
+            },
+            token
+          },
+        })
+      )
+    } catch(e){
+      const errorCode = e.code;
+      const errorMessage = e.message;
+      // The email of the user's account used.
+      // The AuthCredential type that was used.
+      const credential = GoogleAuthProvider.credentialFromError(e);
+      console.log(credential)
+      next(new ServerError(e));
     }
-
-    if (!user) {
-      user = await this.model.set({
-        email: signIn.user.email,
-        password: null,
-        fullname: signIn.user.displayName,
-        provider: signIn.providerId,
-        googleId: signIn.user.uid,
-        avatar: signIn.user.photoURL,
-        roleId: 3,
-      });
-    }
-
-    const token = createToken({
-      id: user.id,
-    });
-
-    // Send response
-    return res.status(200).json({
-      code: 200,
-      status: 'success',
-      message: 'Sign in with google successfully',
-      data: {
-        user: { ...user, password: undefined },
-        token,
-      },
-    });
-  } catch (e) {
-    console.log('Error during Google sign-in:', e);  // Debug log
-    next(new ServerError(e));
   }
 }
-
-}  
 
 new AuthController(user);
 
