@@ -23,7 +23,7 @@ const signUpSchema = Joi.object({
       "string.pattern.base": `Password must have at least 1 uppercase, 
         1 lowercase, 1 number, and 1 special character (i.e. !@#$%^&*)`,
     }),
-  fullname: Joi.string()
+  fullname: Joi.string(),
 });
 
 const signInSchema = Joi.object({
@@ -65,7 +65,7 @@ class AuthController extends BaseController {
             user: {
               ...user,
               id: undefined,
-              password: undefined,
+              password: undefined,  // Do not return password in response
             },
             token,
           },
@@ -87,7 +87,8 @@ class AuthController extends BaseController {
         email,
         password: await encryptPassword(password),
         fullname,
-        roleId: 3
+        roleId: 3,
+        provider: 'local',  // Set provider to local for normal signup
       });
 
       return res.status(200).json(
@@ -99,7 +100,7 @@ class AuthController extends BaseController {
             user: {
               ...newUser,
               id: undefined,
-              password: undefined,
+              password: undefined,  // Do not return password in response
             },
           },
         })
@@ -109,7 +110,7 @@ class AuthController extends BaseController {
     }
   };
 
-  whoAmI = async(req, res, next) => {
+  whoAmI = async (req, res, next) => {
     return res.status(200).json(
       this.apiSend({
         code: 200,
@@ -120,66 +121,62 @@ class AuthController extends BaseController {
         },
       })
     );
-  }
+  };
 
-  googleSignIn = async(req, res, next) =>{
+  googleSignIn = async (req, res, next) => {
     const id_token = req.body.idToken;
     const credential = GoogleAuthProvider.credential(id_token);
 
-    // Sign in with credential from the Google user.
     const auth = getAuth();
-    try{
-      const signIn = await signInWithCredential(auth, credential)
-      // Handle Errors here.
-
+    try {
+      // Sign in with Google credentials
+      const signIn = await signInWithCredential(auth, credential);
       let user = await this.model.getOne({ where: { email: signIn.user.email } });
-      if(user?.provider === 'local'){
+
+      // If user exists and provider is 'local', update provider to 'google'
+      if (user && user.provider === 'local') {
         user = await this.model.update(user.id, {
-          provider: signIn.providerId,
-          googleId: signIn.user.uid,
-        })
+          provider: 'google',  // Update provider to google
+          googleId: signIn.user.uid,  // Store the googleId from Firebase
+        });
       }
 
+      // If no user exists, create a new user with Google credentials
       if (!user) {
         user = await this.model.set({
           email: signIn.user.email,
-          password: null,
+          password: null,  // No password needed for Google users
           fullname: signIn.user.displayName,
-          provider: signIn.providerId,
-          googleId: signIn.user.uid,
+          provider: 'google',  // Set provider to google
+          googleId: signIn.user.uid,  // Store googleId in database
           avatar: signIn.user.photoURL,
-          roleId: 3
+          roleId: 3,
         });
       }
-      
-      const token = createToken({
-        id: user.id,
-      });
+
+      // Create JWT token
+      const token = createToken({ id: user.id });
 
       return res.status(200).json(
         this.apiSend({
           code: 200,
           status: "success",
-          message: "Sign in with google succesfully",
+          message: "Sign in with Google successfully",
           data: {
             user: {
               ...user,
-              password: undefined,
+              password: undefined,  // Do not return password in response
             },
-            token
+            token,
           },
         })
-      )
-    } catch(e){
-      const errorCode = e.code;
-      const errorMessage = e.message;
-      // The email of the user's account used.
-      // The AuthCredential type that was used.
-      const credential = GoogleAuthProvider.credentialFromError(e);
-      console.log(credential)
+      );
+    } catch (e) {
+      // Handle errors
+      console.error("Google sign-in error:", e);
       next(new ServerError(e));
     }
-  }
+  };
 }
 
 new AuthController(user);
